@@ -39,14 +39,16 @@
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
           <td class="row-actions">
             <button
-              v-for="action in actions"
+              v-for="action in rowActions(row)"
               :key="action"
               class="link"
+              :disabled="busyRowId === String(row.id)"
               type="button"
               @click="runAction(action, row)"
             >
               {{ action }}
             </button>
+            <span v-if="!rowActions(row).length">—</span>
           </td>
         </tr>
         <tr v-if="!rows.length">
@@ -66,13 +68,12 @@
 import { onMounted, ref } from 'vue'
 
 import { request } from '@/api/client'
+import { allowedPatrolActions, type PatrolWorkflowRules } from './workflow'
 
 type Row = Record<string, string | number | null>
 
 const ENDPOINT = '/api/patrol'
 const columns = ["巡视单号", "巡视路线", "巡视人员", "巡视日期", "发现问题数", "整改项数", "巡视时长", "巡视状态"]
-const actions = ["派发巡视", "提交结果", "作废巡视"]
-const statuses = ["待派发", "巡视中", "已提交", "已作废"]
 const stats = [{"label": "待派发巡视", "value": 0}, {"label": "巡视中任务", "value": 0}, {"label": "本月发现问题", "value": 0}]
 
 const rows = ref<Row[]>([])
@@ -80,6 +81,12 @@ const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+const workflowRules = ref<PatrolWorkflowRules | null>(null)
+const busyRowId = ref('')
+
+function rowActions(row: Row): string[] {
+  return busyRowId.value === String(row.id) ? [] : allowedPatrolActions(row, workflowRules.value)
+}
 
 function resetFilters() {
   filters.value = {}
@@ -94,19 +101,35 @@ function openCreate() {
   errorMessage.value = '巡视单登记入口尚未接入审批流'
 }
 
+async function loadRules() {
+  const response = await request(`${ENDPOINT}/rules`)
+  if (!response.ok) {
+    throw new Error('巡视单流转规则读取失败')
+  }
+  workflowRules.value = (await response.json()) as PatrolWorkflowRules
+}
+
 async function runAction(action: string, row: Row) {
   errorMessage.value = ''
+  const rowId = String(row.id)
+  if (busyRowId.value === rowId) {
+    return
+  }
+  busyRowId.value = rowId
   try {
     const response = await request(`${ENDPOINT}/${row.id}/actions`, {
       method: 'POST',
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ values: { action } }),
     })
-    if (!response.ok) {
-      throw new Error('巡视检查动作未生效，请稍后重试')
+    const payload = await response.json().catch(() => null) as { ok?: boolean; message?: string } | null
+    if (!response.ok || payload?.ok === false) {
+      throw new Error(payload?.message || '巡视检查动作未生效，请稍后重试')
     }
     await reload()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '巡视检查操作失败'
+  } finally {
+    busyRowId.value = ''
   }
 }
 
@@ -126,5 +149,12 @@ async function reload() {
   }
 }
 
-onMounted(reload)
+onMounted(async () => {
+  try {
+    await loadRules()
+    await reload()
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '巡视检查规则读取失败'
+  }
+})
 </script>

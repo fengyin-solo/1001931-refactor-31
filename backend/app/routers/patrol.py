@@ -12,14 +12,11 @@ router = APIRouter(prefix="/api/patrol", tags=["巡视检查"])
 
 service = PatrolService()
 
-LIST_FIELDS = ["巡视单号", "巡视路线", "巡视人员", "巡视日期", "发现问题数", "整改项数", "巡视时长", "巡视状态"]
-STATUSES = ["待派发", "巡视中", "已提交", "已作废"]
-
 
 @router.get("", response_model=PageResult[dict])
 def list_entries(
     keyword: str | None = Query(default=None, description="按巡视单号检索"),
-    status: str | None = Query(default=None, description="待派发、巡视中、已提交、已作废"),
+    status: str | None = Query(default=None, description="按巡视单当前状态过滤"),
     page: int = 1,
     size: int = 20,
 ) -> PageResult[dict]:
@@ -28,6 +25,19 @@ def list_entries(
         raise HTTPException(status_code=400, detail="每页最多 200 条，请缩小分页范围")
     items, total = service.list_entries(keyword=keyword, status=status, page=page, size=size)
     return PageResult(items=items, total=total, page=page, size=size)
+
+
+@router.get("/rules")
+def get_rules() -> dict[str, Any]:
+    """返回巡视单状态顺序、允许动作与作废复位口径，供列表页直接取用。"""
+    return service.workflow_rules()
+
+
+@router.get("/export")
+def export_entries() -> dict[str, Any]:
+    """导出巡视检查清单：返回当前过滤条件下的全量数据。"""
+    items, total = service.list_entries(page=1, size=10000)
+    return {"module": "patrol", "total": total, "items": items}
 
 
 @router.get("/{entry_id}", response_model=dict)
@@ -56,10 +66,3 @@ def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出巡视检查清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "patrol", "total": total, "items": items}

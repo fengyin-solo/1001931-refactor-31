@@ -7,19 +7,21 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.schemas import ActionResult, EntryPayload, PageResult
 from app.services.patrol import PatrolService
+from app.services.patrol_flow import STATUS_ORDER
 
 router = APIRouter(prefix="/api/patrol", tags=["巡视检查"])
 
 service = PatrolService()
 
 LIST_FIELDS = ["巡视单号", "巡视路线", "巡视人员", "巡视日期", "发现问题数", "整改项数", "巡视时长", "巡视状态"]
-STATUSES = ["待派发", "巡视中", "已提交", "已作废"]
+# 顺序表、允许动作与作废复位规则统一由 patrol_flow 提供，这里不再各写一份。
+STATUSES = STATUS_ORDER
 
 
 @router.get("", response_model=PageResult[dict])
 def list_entries(
     keyword: str | None = Query(default=None, description="按巡视单号检索"),
-    status: str | None = Query(default=None, description="待派发、巡视中、已提交、已作废"),
+    status: str | None = Query(default=None, description="、".join(STATUSES)),
     page: int = 1,
     size: int = 20,
 ) -> PageResult[dict]:

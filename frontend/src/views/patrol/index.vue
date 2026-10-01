@@ -39,7 +39,7 @@
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
           <td class="row-actions">
             <button
-              v-for="action in actions"
+              v-for="action in rowActions(row)"
               :key="action"
               class="link"
               type="button"
@@ -47,6 +47,7 @@
             >
               {{ action }}
             </button>
+            <span v-if="!rowActions(row).length" class="empty-state">—</span>
           </td>
         </tr>
         <tr v-if="!rows.length">
@@ -67,12 +68,10 @@ import { onMounted, ref } from 'vue'
 
 import { request } from '@/api/client'
 
-type Row = Record<string, string | number | null>
+type Row = Record<string, string | number | null | string[]>
 
 const ENDPOINT = '/api/patrol'
 const columns = ["巡视单号", "巡视路线", "巡视人员", "巡视日期", "发现问题数", "整改项数", "巡视时长", "巡视状态"]
-const actions = ["派发巡视", "提交结果", "作废巡视"]
-const statuses = ["待派发", "巡视中", "已提交", "已作废"]
 const stats = [{"label": "待派发巡视", "value": 0}, {"label": "巡视中任务", "value": 0}, {"label": "本月发现问题", "value": 0}]
 
 const rows = ref<Row[]>([])
@@ -80,6 +79,13 @@ const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+
+// 巡视单顺序表、允许动作与作废复位规则以后端 patrol_flow 为准，
+// 列表页只渲染每行带回来的 allowed_actions，不再自维护一份。
+function rowActions(row: Row): string[] {
+  const value = row.allowed_actions
+  return Array.isArray(value) ? value : []
+}
 
 function resetFilters() {
   filters.value = {}
@@ -99,10 +105,11 @@ async function runAction(action: string, row: Row) {
   try {
     const response = await request(`${ENDPOINT}/${row.id}/actions`, {
       method: 'POST',
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ values: { action } }),
     })
-    if (!response.ok) {
-      throw new Error('巡视检查动作未生效，请稍后重试')
+    const result = (await response.json()) as { ok?: boolean; message?: string }
+    if (!response.ok || !result.ok) {
+      throw new Error(result.message || '巡视检查动作未生效，请稍后重试')
     }
     await reload()
   } catch (error) {
